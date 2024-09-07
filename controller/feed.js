@@ -1,6 +1,7 @@
 
 const { validationResult } = require('express-validator')
 const Post = require('../model/post')
+const User = require('../model/user')
 const fs =require('fs');
 const path =require('path');
 
@@ -50,20 +51,29 @@ exports.createPost = (req,res,next)=>{
     }
     const title = req.body.title;
     const content = req.body.content;
-    const imageUrl = req.file.path
+    const imageUrl = req.file.path;
+    let creator;
     const post = new Post({
         title:title, 
         content:content,
         imageUrl :imageUrl,
-        creator : {
-            name : 'Rizwan Ali'
-        },
+        creator :req.userId
     })
     post.save()
     .then(result=>{
+      return  User.findById(req.userId)
+    }).then(user=>{
+        creator=user;
+        user.posts.push(post)
+       return user.save();
+      
+    }).then(result=>{
         res.status(201).json({
             message:"Post created successfully",
-            post: result
+            post: post,
+            creator : {
+                _id : creator._id, name : creator.name
+            }
         })
     })
     .catch(err=>{
@@ -119,6 +129,13 @@ exports.updatePost = (req,res,next)=>{
             error.statusCode= 404;
             throw error;
         }
+        console.log(req.userId)
+        if(post.creator.toString() !== req.userId.toString())
+        {
+            const error = new Error('Unauthorized');
+            error.statusCode= 403;
+            throw error;
+        }
         if(imageUrl !== post.imageUrl)
         {
             clearImage(post.imageUrl)
@@ -153,12 +170,24 @@ exports.deletePost = (req,res,next)=>{
             error.statusCode= 404;
             throw error;
         }
+        if(post.creator.toString() !== req.userId.toString())
+            {
+                const error = new Error('Unauthorized');
+                error.statusCode= 403;
+                throw error;
+            }
         clearImage(post.imageUrl);
         return Post.findByIdAndDelete(postId)
     }).then(result=>{
+      return  User.findById(req.userId);
+    })
+    .then(user=>{
+        user.posts.pull(postId);
+       return user.save();
+    })
+    .then(result=>{
         res.status(200).json({
             message:"Post Deleted",
-            post: result
         })
     })
     .catch(err=>{
@@ -171,6 +200,59 @@ exports.deletePost = (req,res,next)=>{
     })
 }
 
+
+exports.getStatus = async (req,res,next)=>{
+    User.findById(req.userId)
+    .then(user=>{
+        if(!user)
+        {
+            const error = "No user found with this email";
+            error.statusCode =401;
+            throw error;
+        }
+        res.status(200 ).json({
+            message: "Status fetched successfully",
+            status : user.status,
+        })
+    })
+    .catch(err=>{
+        if(!err.statusCode)
+        {
+            err.statusCode=500;
+        }
+        next(err)
+    })
+    
+}
+
+exports.updateStatus = async (req,res,next)=>{
+    const newStatus = req.body.status;
+    User.findById(req.userId)
+    .then(user=>{
+        if(!user)
+        {
+            const error = "No user found with this email";
+            error.statusCode =401;
+            throw error;
+        }
+        user.status = newStatus;
+        return user.save();
+
+    })
+    .then(result=>{
+        res.status(200 ).json({
+            message: "Status fetched successfully",
+        })
+    })
+    .catch(err=>{
+        if(!err.statusCode)
+        {
+            err.statusCode=500;
+        }
+        next(err)
+    })
+    
+}
 
 const clearImage =filePlath=>{
     filePlath = path.join(__dirname,"..",filePlath);
